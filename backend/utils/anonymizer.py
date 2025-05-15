@@ -2,6 +2,9 @@ import pydicom
 import cv2
 import numpy as np
 import easyocr
+import cv2
+import numpy as np
+import easyocr
 from pydicom.uid import generate_uid
 import re
 import os
