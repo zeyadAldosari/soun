@@ -1,0 +1,11 @@
+{
+    "cSpell.words": [
+        "dcmread",
+        "dicom",
+        "fastapi",
+        "pydantic",
+        "pydicom",
+        "soun",
+        "uvicorn"
+    ]
+}
