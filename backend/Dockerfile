@@ -7,6 +7,7 @@ RUN apt-get update && apt-get install -y \
     gcc \
     dos2unix \
     libgl1 \
+    libglib2.0-0 \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
@@ -21,4 +22,4 @@ COPY ./entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 RUN dos2unix /entrypoint.sh
 
-CMD ["python",  "app.py", "0.0.0.0:8000"]
+CMD ["python",  "app.py"]
