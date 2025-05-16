@@ -110,6 +110,7 @@ URL_PATTERN = re.compile(r'https?://(?:[-\w.]|(?:%[\da-fA-F]{2}))+')
 
 # Expanded non-sensitive technical terms
 NON_SENSITIVE_TECHNICAL_TERMS = [
+ 
     # Imaging terminology
     'image', 'slice', 'frame', 'series', 'scan', 'sequence', 'protocol', 'cine', 'zoom',
     'thick', 'thickness', 'spacing', 'kernel', 'window', 'level', 'fov', 'field of view', 'matrix', 'recon',
@@ -159,6 +160,65 @@ NON_SENSITIVE_TECHNICAL_TERMS = [
     'pet', 'spect', 'fluoroscopy', 'fluoro', 'mammo', 'mammography', 'tomo', 'tomosynthesis',
     'dexa', 'dxa', 'bone density', 'nuclear', 'angiography', 'interventional',
     
+    # Measurements and units - EXPANDED
+    'measurement', 'dimension', 'distance', 'area', 'volume', 'diameter', 'radius',
+    'length', 'width', 'height', 'depth', 'size', 'mean', 'average', 'std', 'standard deviation',
+    'min', 'max', 'median', 'ratio', 'hounsfield', 'hu', 'suv', 'adc', 'apparent diffusion coefficient',
+    'millimeter', 'millimeters', 'centimeter', 'centimeters', 'meter', 'meters',
+    'milliliter', 'milliliters', 'cubic centimeter', 'cubic centimeters', 'cc', 'liter', 'liters',
+    'gram', 'grams', 'kilogram', 'kilograms', 'milligram', 'milligrams',
+    'second', 'seconds', 'millisecond', 'milliseconds', 'minute', 'minutes', 'hour', 'hours',
+    'hertz', 'kilohertz', 'megahertz', 'gigahertz',
+    'degree', 'degrees', 'radian', 'radians',
+    'pixel', 'pixels', 'voxel', 'voxels',
+    'beat', 'beats', 'bpm', 'mmhg', 'pascal', 'pascals', 'kpa',
+    'density', 'pressure', 'force', 'velocity', 'acceleration', 'speed',
+    'concentration', 'percentage', 'percent', 'ratio', 'fraction', 'cm', 'mm', 'lt','ml',
+    
+    # Time and positioning
+    'temp', 'temperature', 'time', 'date', 'phase', 'pre', 'post', 'prone', 'supine',
+    'decubitus', 'upright', 'erect', 'recumbent', 'duration', 'interval',
+    
+    # Research-specific terms
+    'score', 'grade', 'stage', 'classification', 'category', 'type', 'group',
+    'control', 'test', 'experiment', 'trial', 'study', 'cohort', 'sample',
+    'p-value', 'p value', 'confidence interval', 'ci', 'odds ratio', 'or',
+    'relative risk', 'rr', 'hazard ratio', 'hr', 'standard error', 'se',
+    'standard deviation', 'sd', 'interquartile range', 'iqr',
+    'mean', 'median', 'mode', 'average', 'variance', 'correlation',
+    'sensitivity', 'specificity', 'precision', 'recall', 'accuracy',
+    'positive predictive value', 'ppv', 'negative predictive value', 'npv',
+    'area under curve', 'auc', 'receiver operating characteristic', 'roc',
+    
+    # Statistical terms
+    'normal', 'gaussian', 'distribution', 'parametric', 'nonparametric',
+    'anova', 't-test', 't test', 'wilcoxon', 'mann-whitney', 'mann whitney',
+    'chi-square', 'chi square', 'fisher', 'regression', 'correlation',
+    'covariate', 'variable', 'dependent', 'independent', 'predictor',
+    'univariate', 'multivariate', 'logistic', 'linear', 'categorical',
+    'continuous', 'discrete', 'nominal', 'ordinal', 'interval', 'ratio',
+    
+    # Disease/condition measures
+    'grade', 'stage', 'score', 'scale', 'index', 'severity', 'classification',
+    'tnm', 'metastasis', 'recurrence', 'remission', 'survival',
+    'progression', 'progression-free', 'progression free',
+    'disease-free', 'disease free', 'overall survival', 'os',
+    
+    # Lab values
+    'hemoglobin', 'hgb', 'hematocrit', 'hct', 'platelet', 'plt',
+    'white blood cell', 'wbc', 'red blood cell', 'rbc',
+    'albumin', 'globulin', 'protein', 'glucose', 'hba1c',
+    'creatinine', 'bun', 'gfr', 'egfr', 'alt', 'ast', 'alp',
+    'ldl', 'hdl', 'triglyceride', 'cholesterol', 'sodium', 'potassium',
+    'chloride', 'calcium', 'phosphate', 'magnesium',
+    'inr', 'pt', 'ptt', 'troponin', 'ck', 'ck-mb', 'ck mb',
+    'psa', 'cea', 'afp', 'ca-125', 'ca125', 'ca 125',
+    
+    # Common modalities
+    'xray', 'x-ray', 'radiograph', 'ct', 'mr', 'mri', 'us', 'ultrasound', 'sono',
+    'pet', 'spect', 'fluoroscopy', 'fluoro', 'mammo', 'mammography', 'tomo', 'tomosynthesis',
+    'dexa', 'dxa', 'bone density', 'nuclear', 'angiography', 'interventional',
+    
     # Measurements and units
     'measurement', 'dimension', 'distance', 'area', 'volume', 'diameter', 'radius',
     'length', 'width', 'height', 'depth', 'size', 'mean', 'average', 'std', 'standard deviation',
@@ -200,16 +260,6 @@ class DicomAnonymizer:
                  self.debug_ocr_prep_path = None
 
     def is_sensitive_text(self, text):
-        """
-        Determine if text contains sensitive patient information.
-        Takes a conservative approach - if text isn't explicitly non-sensitive, mark it as sensitive.
-        
-        Args:
-            text (str): Text to analyze
-            
-        Returns:
-            bool: True if sensitive information detected, False otherwise
-        """
         if not text:
             return False
         
@@ -222,35 +272,47 @@ class DicomAnonymizer:
         
         text_lower = text_stripped.lower()
         
+        # DIRECTLY CHECK FOR MEASUREMENTS WITH COMMA OR PERIOD DECIMAL SEPARATORS
+        # This will catch values like "1,06 cm" or "1.06 cm"
+        measurement_pattern = re.compile(
+            r'^(?:\d+(?:[.,]\d+)?|\d+)(?:\s*x\s*(?:\d+(?:[.,]\d+)?|\d+))*\s*(?:mm|cm|m|ml|cc|sec|min|msec|hz|kg|g|lb|°|deg|degree|bpm|mmHg)s?$', 
+            re.IGNORECASE
+        )
+        if measurement_pattern.match(text_stripped):
+            logger.debug(f"Measurement value detected (non-sensitive): '{text_stripped}'")
+            return False
+        
         # Check for non-sensitive technical terms - return False only if definitely non-sensitive
         for term in NON_SENSITIVE_TECHNICAL_TERMS:
             # Exact match
             if re.fullmatch(term, text_lower):
-                # logger.debug(f"'{text_stripped}' matches non-sensitive tech term '{term}'")
                 return False
-            # Term with numbers (e.g., "slice 5", "t1 500")
-            if re.fullmatch(f"{term}\\s*\\d+[\\./\\d+]*[a-z%]*", text_lower, re.IGNORECASE):
-                # logger.debug(f"'{text_stripped}' matches non-sensitive term with number pattern")
+                
+            # Term with numbers - NOW SUPPORTING BOTH COMMA AND PERIOD DECIMALS
+            term_with_num_pattern = f"{term}\\s*\\d+(?:[.,]\\d+)*[a-z%]*"
+            if re.fullmatch(term_with_num_pattern, text_lower, re.IGNORECASE):
                 return False
-            # Numbers with term (e.g., "5 mm", "3.5 cm")
-            if re.fullmatch(f"\\d+[\\./\\d+]*[a-z%]*\\s*{term}", text_lower, re.IGNORECASE):
-                # logger.debug(f"'{text_stripped}' matches number with non-sensitive term pattern")
+                
+            # Numbers with term - NOW SUPPORTING BOTH COMMA AND PERIOD DECIMALS
+            num_with_term_pattern = f"\\d+(?:[.,]\\d+)*[a-z%]*\\s*{term}"
+            if re.fullmatch(num_with_term_pattern, text_lower, re.IGNORECASE):
                 return False
+                
             # Single word exact match
             if len(text_stripped.split()) == 1 and term == text_lower:
-                # logger.debug(f"'{text_stripped}' exactly matches non-sensitive term '{term}'")
                 return False
+        
+        # Special handling for measurement values with European number format (comma as decimal separator)
+        european_measurement_pattern = re.compile(
+            r'^\d+,\d+\s*(?:mm|cm|m|ml|cc|sec|min|msec|hz|kg|g|lb|°|deg|degree|bpm|mmHg)s?$', 
+            re.IGNORECASE
+        )
+        if european_measurement_pattern.match(text_stripped):
+            logger.debug(f"European format measurement value detected (non-sensitive): '{text_stripped}'")
+            return False
         
         # Short numbers are typically not sensitive
         if text_stripped.isdigit() and len(text_stripped) < 4:
-            return False
-            
-        # Known measurement patterns (e.g., "5 mm", "3.5 cm", "120 bpm")
-        measurement_pattern = re.compile(
-            r'^\d+(?:\.\d+)?(?:\s*x\s*\d+(?:\.\d+)?)*\s*(?:mm|cm|m|ml|cc|sec|min|msec|hz|kg|g|lb|°|deg|degree|bpm|mmHg)s?$', 
-            re.IGNORECASE
-        )
-        if measurement_pattern.match(text_stripped):
             return False
             
         # Known technical identifiers (Version numbers, software versions, etc.)
@@ -291,8 +353,20 @@ class DicomAnonymizer:
         # For ID patterns: Use a less restrictive approach - if it looks like an ID, mark it sensitive
         id_match = ID_PATTERN.search(text_stripped)
         if id_match:
+            # EXCEPTION: If it's a measurement with units, don't mark as sensitive
+            if re.search(r'\d+(?:[.,]\d+)?\s*(?:mm|cm|m|ml|cc|sec|min|msec|hz|kg|g|lb)', text_stripped, re.IGNORECASE):
+                return False
             logger.debug(f"Potential ID found in: '{text_stripped}'")
             return True
+            
+        # More measurement patterns to handle edge cases
+        complex_measurement_pattern = re.compile(
+            r'^(?:\d+(?:[.,]\d+)?|\d+)\s*(?:x|\*)\s*(?:\d+(?:[.,]\d+)?|\d+)\s*(?:mm|cm|m|ml|cc|sec|min|hz)s?$', 
+            re.IGNORECASE
+        )
+        if complex_measurement_pattern.match(text_stripped):
+            logger.debug(f"Complex measurement detected (non-sensitive): '{text_stripped}'")
+            return False
         
         # DEFAULT CASE: If we got here, and the text contains letters, assume it might be sensitive
         if any(c.isalpha() for c in text_stripped):
@@ -318,12 +392,16 @@ class DicomAnonymizer:
         
         # Numeric text not caught by earlier rules - could be sensitive
         if any(c.isdigit() for c in text_stripped):
+            # Final check for measurements
+            possible_measurement = re.match(r'^\d+(?:[.,]\d+)?$', text_stripped)
+            if possible_measurement:
+                logger.debug(f"Possible numeric value (allowing): '{text_stripped}'")
+                return False
             logger.debug(f"Marking as sensitive by default (contains numbers): '{text_stripped}'")
             return True
             
         # If we somehow get here (text with no letters or numbers?), mark as non-sensitive
         return False
-
     def _get_preprocessed_versions(self, img_bgr_input, base_filename="unknown"):
         """
         Prepares image versions for OCR. Currently uses equalized grayscale.
