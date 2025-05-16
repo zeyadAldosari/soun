@@ -9,6 +9,20 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "@cornerstonejs/core": "^3.15.2",
+    "@cornerstonejs/dicom-image-loader": "^3.15.2",
+    "@cornerstonejs/nifti-volume-loader": "^3.15.2",
+    "@cornerstonejs/tools": "^3.15.2",
+    "@emotion/react": "^11.14.0",
+    "@emotion/styled": "^11.14.0",
+    "@icr/polyseg-wasm": "^0.4.0",
+    "@mui/material": "^7.1.0",
+    "cornerstone-core": "^2.6.1",
+    "cornerstone-math": "^0.1.10",
+    "cornerstone-tools": "^6.0.10",
+    "cornerstone-wado-image-loader": "^4.13.2",
+    "cornerstone-web-image-loader": "^2.1.1",
+    "dicom-parser": "^1.8.21",
     "motion": "^12.11.4",
     "next": "15.3.2",
     "react": "^19.0.0",
@@ -16,6 +30,7 @@
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
+    "@types/cornerstone-core": "^2.3.3",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
