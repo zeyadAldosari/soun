@@ -13,10 +13,14 @@ from pathlib import Path
 from utils.anonymizer import DicomAnonymizer
 from utils.dicom_faker import insert_fake_data
 from contextlib import asynccontextmanager
+from fastapi.staticfiles import StaticFiles
+from urllib.parse import urljoin
+
 
 logging.basicConfig(level=logging.INFO, 
                     format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
+
 
 app = FastAPI(
     title="DICOM Privacy Tool API",
@@ -26,12 +30,13 @@ app = FastAPI(
 
 UPLOAD_DIR = os.path.join(os.getcwd(), "temp_uploads")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
-
+app.mount("/files", StaticFiles(directory=UPLOAD_DIR), name="files")
 
 class ProcessResponse(BaseModel):
     """Response model for DICOM processing endpoints"""
     filename: str
     message: str
+    file_url: str    
     stats: Optional[dict] = None
 
 
@@ -63,7 +68,7 @@ async def insert_fake_data_endpoint(file: UploadFile = File(...)):
         raise HTTPException(status_code=500, detail=f"Error processing file: {str(e)}")
 
 
-@app.post("/anonymize/", response_model=ProcessResponse)
+@app.post("/anonymize/")
 async def anonymize_endpoint(
     file: UploadFile = File(...),
     use_advanced: bool = Query(False, description="Use the advanced anonymizer implementation"),
@@ -71,12 +76,6 @@ async def anonymize_endpoint(
     keep_uids: bool = Query(False, description="Keep original UIDs"),
     force_uncompressed: bool = Query(True, description="Convert to uncompressed transfer syntax")
 ):
-    """
-    Anonymize a DICOM file (.dcm)
-    
-    This endpoint will create a new anonymized version of the input DICOM file.
-    You can choose between the original anonymizer or the advanced implementation.
-    """
     if not file.filename.lower().endswith(".dcm"):
         raise HTTPException(status_code=400, detail="Only .dcm files are accepted")
     
@@ -108,9 +107,12 @@ async def anonymize_endpoint(
             anonymizer = DicomAnonymizer()
             anonymizer.anonymize_file(temp_file_path, output_path)
         
+        file_url = f"/files/{output_filename}"
+        
         return ProcessResponse(
             filename=output_filename,
             message="DICOM file anonymized successfully",
+            file_url=file_url,  # Include the URL in the response
             stats=stats
         )
     except Exception as e:
