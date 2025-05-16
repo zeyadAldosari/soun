@@ -25,6 +25,7 @@ export default function HeroSection() {
 
   return (
     <div className="flex justify-center h-full items-center lg:flex-row flex-col-reverse lg:gap-10 gap-30 z-10 px-5 pt-10 w-full">
+      
       <div className="grid gap-4">
         <motion.div
           transition={{ staggerChildren: 0.2 }}
@@ -66,7 +67,7 @@ export default function HeroSection() {
           </motion.p>
           <motion.a
             variants={textVariants}
-            href=""
+            href="#upload"
             className="text-white overflow-hidden relative xl:text-xl text-md font-bold bg-black rounded-2xl px-8 py-4 w-min text-nowrap hover:bg-[#050505] transition-colors"
           >
             <Image
@@ -139,7 +140,7 @@ export default function HeroSection() {
               variants={textVariants}
               className="w-1/2 aspect-square -left-20 top-3/5 absolute bg-[#404040]/9 border border-[#404040]/10 rounded-2xl bg-opacity-20 backdrop-blur-md"
             >
-              <Image alt="hands" src={skull} fill className="rounded-2xl p-2" />
+              <Image alt="hands" src={skull} sizes='100%' fill className="rounded-2xl p-2" />
             </motion.div>
           </motion.div>
         </motion.div>
