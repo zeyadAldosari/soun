@@ -1,9 +1,9 @@
 faker==37.3.0
-pydicom==3.0.1
-uvicorn==0.34.2
-pydantic==2.11.4
-fastapi==0.115.12
-python-multipart==0.0.20
+pydicom
+uvicorn
+pydantic
+fastapi
+python-multipart
 numpy
 easyocr
 opencv-python
