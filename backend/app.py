@@ -9,13 +9,10 @@ import uvicorn
 import logging
 from typing import Optional
 import time
-from pathlib import Path
 from utils.anonymizer import DicomAnonymizer
 from utils.dicom_faker import insert_fake_data
 from contextlib import asynccontextmanager
 from fastapi.staticfiles import StaticFiles
-from urllib.parse import urljoin
-
 
 logging.basicConfig(level=logging.INFO, 
                     format='%(asctime)s - %(levelname)s - %(message)s')
@@ -266,4 +263,4 @@ async def lifespan(app: FastAPI):
 
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=80)
