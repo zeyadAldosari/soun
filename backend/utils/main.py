@@ -48,7 +48,7 @@ def main():
             success = anonymizer.anonymize_file(
                 dicom_path, 
                 output_path, 
-                force_uncompressed=True
+               
             )
             
             if success:
@@ -73,7 +73,8 @@ def main():
                 output_dir, 
                 recursive=recursive,
                 file_pattern=file_pattern,
-                force_uncompressed=True
+               
+            
             )
             
             print("\n📊 Anonymization Statistics:")
@@ -110,7 +111,7 @@ def main():
                 output_path,
                 redact_overlays=redact_text,
                 keep_uids=keep_uids,
-                force_uncompressed=not keep_compressed
+              
             )
             
             if success:

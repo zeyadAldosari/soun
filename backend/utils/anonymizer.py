@@ -5,10 +5,10 @@ import easyocr
 from pydicom.uid import generate_uid
 import re
 import os
-from pydicom.pixel_data_handlers.util import apply_modality_lut, apply_voi_lut
 import logging
 from pathlib import Path
 import copy
+from datetime import datetime
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, 
@@ -16,21 +16,6 @@ logging.basicConfig(level=logging.INFO,
 logger = logging.getLogger(__name__)
 
 # Try to import pixel data handlers - don't fail if some are missing
-try:
-    import pydicom.pixel_data_handlers.pylibjpeg_handler as pylibjpeg_handler
-    pydicom.config.pixel_data_handlers.append(pylibjpeg_handler)
-    logger.info("PyLibJPEG pixel data handler loaded - handles JPEG, JPEG-LS, JPEG2000")
-except ImportError:
-    logger.warning("PyLibJPEG pixel data handler not available - compressed files may not load correctly")
-    logger.warning("Install with: pip install pylibjpeg pylibjpeg-libjpeg pylibjpeg-openjpeg pylibjpeg-rle")
-
-try:
-    import pydicom.pixel_data_handlers.pillow_handler as pillow_handler
-    pydicom.config.pixel_data_handlers.append(pillow_handler)
-    logger.info("Pillow pixel data handler loaded")
-except ImportError:
-    logger.warning("Pillow pixel data handler not available")
-
 try:
     import pydicom.pixel_data_handlers.numpy_handler as numpy_handler
     pydicom.config.pixel_data_handlers.append(numpy_handler)
@@ -49,7 +34,6 @@ SENSITIVE_TAGS = [
     (0x0010, 0x1040),  # Patient's Address
     (0x0010, 0x0032),  # Patient's Birth Time
     (0x0010, 0x0050),  # Patient's Insurance Plan Code Sequence
-    (0x0010, 0x0101),  # Patient's Primary Language Code Sequence
     (0x0010, 0x1000),  # Other Patient IDs
     (0x0010, 0x1001),  # Other Patient Names
     (0x0010, 0x1005),  # Patient's Birth Name
@@ -105,12 +89,11 @@ SENSITIVE_TAGS = [
     (0x0018, 0x1020),  # Software Versions
 ]
 
-# Extended keywords for OCR text detection
+# Keywords for OCR text detection - simplified but comprehensive
 SENSITIVE_KEYWORDS = [
     'name', 'id', 'dob', 'birth', 'mrn', 'patient', 'hospital', 'philips', 'ge', 'siemens',
-    'healthcare', 'clinic', 'dr.', 'dr ', 'doctor', 'physician', 'accession', 'medical',
-    'record', 'ssn', 'social', 'security', 'address', 'phone', 'study', 'exam', 'sex',
-    'age', 'male', 'female', 'insurance', 'provider', 'account', 'admission'
+    'healthcare', 'clinic', 'dr.', 'dr ', 'doctor', 'physician', 'medical', 'record',
+    'address', 'phone', 'study', 'exam', 'sex', 'age', 'male', 'female', 'insurance'
 ]
 
 # Regex patterns for sensitive information
@@ -118,12 +101,11 @@ DATE_PATTERN = re.compile(r'\b\d{1,2}[-/]\d{1,2}[-/]\d{2,4}\b')  # Dates like MM
 ID_PATTERN = re.compile(r'\b\d{5,}\b')  # IDs: 5+ digits
 SSN_PATTERN = re.compile(r'\b\d{3}[-]?\d{2}[-]?\d{4}\b')  # SSN: xxx-xx-xxxx
 PHONE_PATTERN = re.compile(r'\b\d{3}[-.]?\d{3}[-.]?\d{4}\b')  # Phone: xxx-xxx-xxxx
-TIME_PATTERN = re.compile(r'\b\d{1,2}:\d{2}(?::\d{2})?\s*(?:AM|PM|am|pm)?\b')  # Times
 
 class DicomAnonymizer:
-    def __init__(self, ocr_languages=['en'], ocr_gpu=False, confidence_threshold=0.5):
+    def __init__(self, ocr_languages=['en'], ocr_gpu=False, confidence_threshold=0.4):
         """
-        Initialize the DICOM anonymizer.
+        Initialize the DICOM anonymizer with simplified approach.
         
         Args:
             ocr_languages: List of languages for OCR
@@ -141,38 +123,30 @@ class DicomAnonymizer:
         }
     
     def is_sensitive_text(self, text):
-        """
-        Check if text contains sensitive information.
-        
-        Args:
-            text: Text to check
-            
-        Returns:
-            bool: True if sensitive, False otherwise
-        """
+        """Check if text contains sensitive information"""
         if not text or len(text) < 2:
             return False
             
         t = text.lower()
+        # Check for hospital names, patient names, etc.
+        name_pattern = re.compile(r'(?i)(bernard|sophie|patient|dr\.|dr\s|hopital|hospital|clinic|philips|healthcare)', re.IGNORECASE)
+        
+        # Image-specific pattern for ultrasound headers (e.g., dates, IDs in formats like 11-05-25-142825)
+        ultrasound_id_pattern = re.compile(r'\d{2}-\d{2}-\d{2}-\d{6}')
+        
         return (
             any(k in t for k in SENSITIVE_KEYWORDS) or
+            name_pattern.search(t) or
             DATE_PATTERN.search(t) or
             ID_PATTERN.search(t) or
             SSN_PATTERN.search(t) or
             PHONE_PATTERN.search(t) or
-            TIME_PATTERN.search(t)
+            ultrasound_id_pattern.search(text)  # Use original text to maintain case
         )
     
-    def preprocess_image(self, img, enhance_contrast=True):
+    def preprocess_image(self, img):
         """
-        Preprocess image for OCR.
-        
-        Args:
-            img: Image to preprocess
-            enhance_contrast: Whether to enhance contrast
-            
-        Returns:
-            Preprocessed image
+        Improved preprocessing for OCR with better handling of color backgrounds
         """
         # Convert to grayscale if needed
         if len(img.shape) == 3:
@@ -180,160 +154,172 @@ class DicomAnonymizer:
         else:
             gray = img.copy()
         
-        # Enhance contrast if requested
-        if enhance_contrast:
-            gray = cv2.equalizeHist(gray)
+        # Apply adaptive histogram equalization for better text detection in varying backgrounds
+        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+        gray_equalized = clahe.apply(gray)
         
-        # Apply additional preprocessing for better OCR
-        # Bilateral filter preserves edges while reducing noise
-        gray = cv2.bilateralFilter(gray, 11, 17, 17)
+        # Create a second version with more aggressive equalization for dark backgrounds
+        clahe_strong = cv2.createCLAHE(clipLimit=4.0, tileGridSize=(4, 4))
+        gray_strong = clahe_strong.apply(gray)
         
-        return gray
-    
-    def extract_pixel_array(self, ds):
-        """
-        Extract and normalize pixel array from DICOM dataset.
+        # Apply mild bilateral filter to reduce noise while preserving edges
+        gray_filtered = cv2.bilateralFilter(gray_equalized, 5, 10, 10)
         
-        Args:
-            ds: DICOM dataset
-            
-        Returns:
-            Normalized image array suitable for processing
-        """
-        try:
-            # Get original pixel data
-            pixel_array = ds.pixel_array
-            
-            # Handle different photometric interpretations
-            photometric = getattr(ds, 'PhotometricInterpretation', 'MONOCHROME2')
-            
-            # Apply modality LUT if present (e.g., for CT Hounsfield units)
-            if hasattr(ds, 'RescaleSlope') or hasattr(ds, 'RescaleIntercept'):
-                pixel_array = apply_modality_lut(pixel_array, ds)
-            
-            # Apply VOI LUT for better visualization if present
-            if hasattr(ds, 'WindowCenter') and hasattr(ds, 'WindowWidth'):
-                pixel_array = apply_voi_lut(pixel_array, ds)
-            
-            # Normalize to 0-255 range for display and OCR
-            if pixel_array.max() > 255 or pixel_array.min() < 0:
-                pixel_min = pixel_array.min()
-                pixel_max = pixel_array.max()
-                if pixel_max > pixel_min:
-                    pixel_array = 255 * (pixel_array - pixel_min) / (pixel_max - pixel_min)
-            
-            # Convert to uint8 for OpenCV operations
-            pixel_array = pixel_array.astype(np.uint8)
-            
-            # Convert to BGR for OpenCV if grayscale
-            if len(pixel_array.shape) == 2:
-                pixel_array = cv2.cvtColor(pixel_array, cv2.COLOR_GRAY2BGR)
-            
-            return pixel_array
-            
-        except Exception as e:
-            logger.error(f"Error extracting pixel array: {e}")
-            raise
+        # Return both versions for processing
+        return gray_filtered, gray_strong
     
     def redact_burned_in_text(self, ds):
         """
-        Detect and redact burned-in text from DICOM images.
-        
-        Args:
-            ds: DICOM dataset
-            
-        Returns:
-            int: Number of redacted text regions
+        Simplified approach to detect and redact burned-in text
         """
         if not hasattr(ds, 'PixelData'):
-            logger.warning("No pixel data found in DICOM file")
+            logger.warning("⚠️ No pixel data found in DICOM file")
             return 0
         
         try:
-            # Store original transfer syntax
-            original_transfer_syntax = ds.file_meta.TransferSyntaxUID
-            is_compressed = original_transfer_syntax != '1.2.840.10008.1.2.1'  # Explicit VR Little Endian
+            # Extract pixel array
+            original_pixel_array = ds.pixel_array.copy()
             
-            if is_compressed:
-                logger.info(f"Processing compressed DICOM with transfer syntax: {original_transfer_syntax}")
+            # Convert to 8-bit for processing if needed
+            if original_pixel_array.dtype != np.uint8:
+                # Scale to 0-255 range
+                pixel_min = original_pixel_array.min()
+                pixel_max = original_pixel_array.max()
+                if pixel_max > pixel_min:
+                    img = ((original_pixel_array - pixel_min) / (pixel_max - pixel_min) * 255).astype(np.uint8)
+                else:
+                    img = np.zeros_like(original_pixel_array, dtype=np.uint8)
+            else:
+                img = original_pixel_array.copy()
             
-            # Extract normalized pixel array for processing
-            img = self.extract_pixel_array(ds)
+            # Convert to BGR for processing if grayscale
+            if len(img.shape) == 2:
+                img_bgr = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
+            else:
+                # Assume it's already in a format we can use
+                img_bgr = img
             
-            # Check if this is a multi-frame image
-            is_multiframe = False
-            if hasattr(ds, 'NumberOfFrames') and ds.NumberOfFrames > 1:
-                is_multiframe = True
-                logger.info(f"Multi-frame image detected with {ds.NumberOfFrames} frames")
-                logger.warning("Multi-frame support is limited - processing only first frame")
-                
-            # Process the image for OCR
-            preprocessed = self.preprocess_image(img)
-            results = self.reader.readtext(preprocessed)
+            # Process the header area separately for higher sensitivity
+            header_height = int(img_bgr.shape[0] * 0.15)  # Top 15% of image
+            header_img = img_bgr[0:header_height, :]
+            
+            # Process image for OCR - improved approach for different background colors
+            preprocessed_img, preprocessed_strong = self.preprocess_image(img_bgr)
+            
+            # Process the header area separately for better detection
+            header_height = int(img_bgr.shape[0] * 0.15)  # Top 15% of image
+            
+            # Run OCR on both preprocessed versions
+            results = self.reader.readtext(preprocessed_img)
+            
+            # Additional OCR on strongly processed version for dark backgrounds
+            results_strong = self.reader.readtext(preprocessed_strong)
+            
+            # Combine results, removing duplicates
+            for result in results_strong:
+                if result not in results:
+                    results.append(result)
+            
+            # Check for header text with lower threshold
+            header_text_detected = False
+            for (bbox, text, conf) in results:
+                if bbox[0][1] < header_height and conf >= max(0.2, self.confidence_threshold - 0.2):
+                    if self.is_sensitive_text(text):
+                        header_text_detected = True
+                        break
+            
+            # Track redacted regions
             redacted_count = 0
             
-            # Keep track of all redacted areas
-            redacted_regions = []
+            # Redact header if needed
+            if header_text_detected:
+                logger.info("🔒 Redacting header area containing possible patient information")
+                
+                # Detect header background color to choose appropriate redaction color
+                header_region = img_bgr[0:header_height, :]
+                avg_color = np.mean(header_region, axis=(0, 1))
+                
+                # If the header is dark (like blue/black), use white for redaction
+                # Otherwise use black for redaction
+                is_dark_header = np.mean(avg_color) < 128
+                
+                if is_dark_header:
+                    logger.info("Detected dark header, using white redaction")
+                    redaction_color = (255, 255, 255)  # White
+                else:
+                    redaction_color = (0, 0, 0)  # Black
+                
+                # Apply redaction with detected color
+                cv2.rectangle(img_bgr, (0, 0), (img_bgr.shape[1], header_height), redaction_color, -1)
+                redacted_count += 1
             
+            # Process all detected text
             for (bbox, text, conf) in results:
-                # Skip low confidence detections
+                logger.info(f"OCR detected: '{text}' with confidence {conf:.2f}")
+                
                 if conf < self.confidence_threshold:
                     continue
-                    
-                logger.debug(f"OCR detected: '{text}' with confidence {conf:.2f}")
                 
                 if self.is_sensitive_text(text):
                     top_left = tuple(map(int, bbox[0]))
                     bottom_right = tuple(map(int, bbox[2]))
                     
-                    # Add some padding to ensure complete redaction
+                    # Add padding to ensure complete redaction
                     padding = 5
                     top_left = (max(0, top_left[0] - padding), max(0, top_left[1] - padding))
-                    bottom_right = (min(img.shape[1], bottom_right[0] + padding), 
-                                   min(img.shape[0], bottom_right[1] + padding))
+                    bottom_right = (min(img_bgr.shape[1], bottom_right[0] + padding), 
+                                   min(img_bgr.shape[0], bottom_right[1] + padding))
                     
-                    # Store redacted region
-                    redacted_regions.append((top_left, bottom_right))
+                    # Determine if this region has a dark background
+                    region = img_bgr[top_left[1]:bottom_right[1], top_left[0]:bottom_right[0]]
+                    if region.size > 0:  # Ensure region is valid
+                        avg_color = np.mean(region, axis=(0, 1)) if region.size > 0 else np.array([0, 0, 0])
+                        is_dark_region = np.mean(avg_color) < 128
+                        
+                        # Choose redaction color based on background
+                        if is_dark_region:
+                            redaction_color = (255, 255, 255)  # White for dark backgrounds
+                        else:
+                            redaction_color = (0, 0, 0)  # Black for light backgrounds
+                    else:
+                        redaction_color = (0, 0, 0)  # Default to black
                     
-                    # Redact with black rectangle
-                    cv2.rectangle(img, top_left, bottom_right, (0, 0, 0), -1)
+                    # Apply redaction with appropriate color
+                    cv2.rectangle(img_bgr, top_left, bottom_right, redaction_color, -1)
                     redacted_count += 1
-                    logger.info(f"Redacted text: '{text}'")
+                    logger.info(f"🔒 Redacted text: '{text}' with confidence {conf:.2f}")
             
             if redacted_count > 0:
-                # Convert back to appropriate format for DICOM
-                if len(ds.pixel_array.shape) == 2:
-                    img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+                # Convert back to grayscale if needed
+                if len(original_pixel_array.shape) == 2:
+                    img_processed = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
+                else:
+                    img_processed = img_bgr
                 
-                # For compressed transfer syntaxes, we need to handle this differently
-                # Always convert to uncompressed transfer syntax after modifying pixel data
+                # Update DICOM file with redacted image, always using uncompressed transfer syntax
                 ds.file_meta.TransferSyntaxUID = '1.2.840.10008.1.2.1'  # Explicit VR Little Endian
                 
-                # Update pixel data
-                if len(img.shape) == 2:
-                    # For grayscale images
-                    ds.Rows = img.shape[0]
-                    ds.Columns = img.shape[1]
-                    ds.SamplesPerPixel = 1
-                    ds.BitsAllocated = 8
-                    ds.BitsStored = 8
-                    ds.HighBit = 7
-                    ds.PixelRepresentation = 0
-                    ds.PixelData = img.tobytes()
+                # Preserve original pixel data characteristics
+                if original_pixel_array.dtype != np.uint8:
+                    # Convert back to original data range and type
+                    if img_processed.dtype == np.uint8 and original_pixel_array.dtype != np.uint8:
+                        # Scale back to original range
+                        img_float = img_processed.astype(np.float32) / 255.0
+                        img_scaled = img_float * (pixel_max - pixel_min) + pixel_min
+                        img_final = img_scaled.astype(original_pixel_array.dtype)
+                    else:
+                        img_final = img_processed
                 else:
-                    # For color images
-                    ds.Rows = img.shape[0]
-                    ds.Columns = img.shape[1]
-                    ds.SamplesPerPixel = 3
-                    ds.BitsAllocated = 8
-                    ds.BitsStored = 8
-                    ds.HighBit = 7
-                    ds.PixelRepresentation = 0
-                    ds.PhotometricInterpretation = "RGB"
-                    ds.PlanarConfiguration = 0  # Color-by-pixel
-                    ds.PixelData = img.tobytes()
+                    img_final = img_processed
                 
-                # Update metadata if needed
+                # Update pixel data
+                ds.PixelData = img_final.tobytes()
+                
+                # Update metadata to ensure consistency
+                ds.Rows = img_final.shape[0]
+                ds.Columns = img_final.shape[1]
+                
+                # Mark burned-in annotations as removed
                 if hasattr(ds, 'BurnedInAnnotation'):
                     ds.BurnedInAnnotation = 'NO'
                 
@@ -343,20 +329,13 @@ class DicomAnonymizer:
             return redacted_count
             
         except Exception as e:
-            logger.error(f"Error redacting burned-in text: {e}")
+            logger.error(f"❌ Error redacting burned-in text: {e}")
             self.stats['errors'] += 1
             return 0
     
     def anonymize_dataset(self, ds, keep_uids=False):
         """
-        Anonymize a DICOM dataset.
-        
-        Args:
-            ds: DICOM dataset to anonymize
-            keep_uids: Whether to keep original UIDs
-            
-        Returns:
-            Anonymized DICOM dataset
+        Anonymize a DICOM dataset by removing sensitive tags
         """
         # Clone dataset to avoid modifying the original
         ds_anon = ds.copy()
@@ -365,7 +344,22 @@ class DicomAnonymizer:
         tags_removed = 0
         for tag in SENSITIVE_TAGS:
             if tag in ds_anon:
-                logger.debug(f"Removing tag {ds_anon[tag].name}: {ds_anon[tag].value}")
+                tag_name = ds_anon[tag].name
+                tag_value = str(ds_anon[tag].value)
+                # Mask the value for privacy in logs if it's not empty
+                if tag_value.strip():
+                    # Keep first character and mask the rest for patient info
+                    if "Patient" in tag_name and len(tag_value) > 1:
+                        if "Date" not in tag_name:  # Don't mask dates
+                            masked_value = tag_value[0] + "*" * (len(tag_value) - 1)
+                        else:
+                            masked_value = tag_value
+                    else:
+                        masked_value = tag_value
+                else:
+                    masked_value = ""
+                
+                logger.info(f"❌ Removing tag {tag_name}: {masked_value}")
                 del ds_anon[tag]
                 tags_removed += 1
         
@@ -387,98 +381,109 @@ class DicomAnonymizer:
         
         return ds_anon
     
-    def anonymize_file(self, input_path, output_path, redact_overlays=True, keep_uids=False,
-                       force_uncompressed=True):
+    def anonymize_file(self, input_path, output_path, redact_overlays=True, keep_uids=False):
         """
-        Anonymize a DICOM file and save to output path.
+        Anonymize a DICOM file and save to output path - simplified approach
         
         Args:
             input_path: Path to input DICOM file
             output_path: Path to output anonymized DICOM file
             redact_overlays: Whether to attempt redaction of burned-in text
             keep_uids: Whether to keep original UIDs
-            force_uncompressed: Convert to uncompressed transfer syntax
             
         Returns:
             bool: True if successful, False otherwise
         """
         try:
-            logger.info(f"Processing: {input_path}")
+            logger.info(f"📄 Processing: {input_path}")
+            logger.info(f"📤 Output will be saved to: {output_path}")
             
-            # Read DICOM file - force_read=True to bypass errors
+            # Read DICOM file - force=True to bypass some errors
             try:
                 ds = pydicom.dcmread(input_path, force=True)
             except Exception as e:
-                logger.error(f"Error reading DICOM file: {e}")
-                logger.info("Trying to read file with different pixel data handlers...")
-                
-                # If we fail, try with different force parameters
-                ds = pydicom.dcmread(input_path, force=True)
+                logger.error(f"❌ Error reading DICOM file: {e}")
+                self.stats['errors'] += 1
+                self.stats['skipped_files'] += 1
+                return False
             
-            # Check for compression
-            original_ts = ds.file_meta.TransferSyntaxUID
-            is_compressed = original_ts != '1.2.840.10008.1.2.1'  # Explicit VR Little Endian
+            # Check if there's pixel data
+            has_pixel_data = hasattr(ds, 'PixelData')
+            if not has_pixel_data:
+                logger.warning("⚠️ DICOM file has no pixel data - OCR and redaction will be skipped")
             
-            if is_compressed:
-                logger.info(f"File uses compressed transfer syntax: {original_ts}")
-                logger.info("Recommended dependencies for this file:")
-                
-                if "1.2.840.10008.1.2.4.50" in original_ts or "1.2.840.10008.1.2.4.51" in original_ts:
-                    # JPEG Baseline/Extended
-                    logger.info("JPEG compression detected - install: pip install pylibjpeg pylibjpeg-libjpeg")
-                elif "1.2.840.10008.1.2.4.80" in original_ts or "1.2.840.10008.1.2.4.81" in original_ts:
-                    # JPEG-LS
-                    logger.info("JPEG-LS compression detected - install: pip install pylibjpeg pylibjpeg-libjpeg")
-                elif "1.2.840.10008.1.2.4.90" in original_ts or "1.2.840.10008.1.2.4.91" in original_ts:
-                    # JPEG 2000
-                    logger.info("JPEG 2000 compression detected - install: pip install pylibjpeg pylibjpeg-openjpeg")
-                elif "1.2.840.10008.1.2.5" in original_ts:
-                    # RLE
-                    logger.info("RLE compression detected - install: pip install pylibjpeg pylibjpeg-rle")
+            # Create a copy for anonymization
+            ds_copy = copy.deepcopy(ds)
             
-            # Anonymize dataset
-            ds_anon = self.anonymize_dataset(ds, keep_uids)
+            # First anonymize dataset metadata
+            ds_anon = self.anonymize_dataset(ds_copy, keep_uids)
+            
+            # Remember original transfer syntax
+            original_syntax = None
+            if hasattr(ds_anon, 'file_meta') and hasattr(ds_anon.file_meta, 'TransferSyntaxUID'):
+                original_syntax = ds_anon.file_meta.TransferSyntaxUID
             
             # Redact burned-in text if requested
             redacted_count = 0
-            if redact_overlays and hasattr(ds_anon, 'PixelData'):
+            if redact_overlays and has_pixel_data:
                 try:
+                    logger.info("🔍 Starting OCR detection for burned-in text...")
                     redacted_count = self.redact_burned_in_text(ds_anon)
+                    
                     if redacted_count > 0:
-                        logger.info(f"Redacted {redacted_count} text regions")
+                        logger.info(f"Redacted {redacted_count} text regions ✅")
+                        # Redaction already sets to uncompressed transfer syntax 1.2.840.10008.1.2.1
                     else:
-                        logger.info("No sensitive burned-in text detected")
+                        logger.info("No sensitive burned-in text detected ✅")
+                        # If we didn't redact anything, restore original transfer syntax
+                        if original_syntax:
+                            ds_anon.file_meta.TransferSyntaxUID = original_syntax
                 except Exception as e:
-                    logger.error(f"Error during text redaction: {e}")
+                    logger.error(f"❌ Error during text redaction: {e}")
                     self.stats['errors'] += 1
-            
-            # Force uncompressed transfer syntax if requested
-            if force_uncompressed and is_compressed and not (redacted_count > 0):  # If redacted, we've already changed the TS
-                logger.info("Converting to uncompressed transfer syntax")
-                ds_anon.file_meta.TransferSyntaxUID = '1.2.840.10008.1.2.1'  # Explicit VR Little Endian
             
             # Make sure the output directory exists
             os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
             
-            # Save anonymized file
-            ds_anon.save_as(output_path)
-            logger.info(f"Anonymized file saved as: {output_path}")
+            # Add a "modified" tag to track processing
+            current_time = datetime.now().time()
+            formatted_time = current_time.strftime('%H%M%S.%f')
+            ds_anon.add_new([0x0008, 0x0031], 'TM', formatted_time)
             
-            # Update statistics
-            self.stats['processed_files'] += 1
-            
-            return True
-            
+            try:
+                # Save anonymized file
+                ds_anon.save_as(output_path)
+                logger.info(f"✅ Anonymized file saved as: {output_path}")
+                
+                # Update statistics
+                self.stats['processed_files'] += 1
+                return True
+            except Exception as e:
+                logger.error(f"❌ Error saving file: {e}")
+                
+                # Try one more time with uncompressed transfer syntax
+                try:
+                    logger.warning("⚠️ Trying to save with uncompressed format...")
+                    ds_anon.file_meta.TransferSyntaxUID = '1.2.840.10008.1.2.1'  # Explicit VR Little Endian
+                    ds_anon.save_as(output_path)
+                    logger.info(f"✅ Saved file in uncompressed format: {output_path}")
+                    return True
+                except Exception as e2:
+                    logger.error(f"❌ Final error saving file: {e2}")
+                    self.stats['errors'] += 1
+                    self.stats['skipped_files'] += 1
+                    return False
+        
         except Exception as e:
-            logger.error(f"Error anonymizing file {input_path}: {e}")
+            logger.error(f"❌ Error anonymizing file {input_path}: {e}")
             self.stats['errors'] += 1
             self.stats['skipped_files'] += 1
             return False
     
     def anonymize_directory(self, input_dir, output_dir, recursive=True, file_pattern='*.dcm',
-                           redact_overlays=True, keep_uids=False, force_uncompressed=True):
+                           redact_overlays=True, keep_uids=False):
         """
-        Anonymize all DICOM files in a directory.
+        Anonymize all DICOM files in a directory
         
         Args:
             input_dir: Input directory containing DICOM files
@@ -487,7 +492,6 @@ class DicomAnonymizer:
             file_pattern: File pattern to match DICOM files
             redact_overlays: Whether to attempt redaction of burned-in text
             keep_uids: Whether to keep original UIDs
-            force_uncompressed: Convert to uncompressed transfer syntax
             
         Returns:
             dict: Statistics about the processing
@@ -529,17 +533,16 @@ class DicomAnonymizer:
                 str(file_path), 
                 str(output_path),
                 redact_overlays=redact_overlays,
-                keep_uids=keep_uids,
-                force_uncompressed=force_uncompressed
+                keep_uids=keep_uids
             )
         
         # Log final statistics
-        logger.info(f"Anonymization complete. Statistics:")
-        logger.info(f"  Processed files: {self.stats['processed_files']}")
-        logger.info(f"  Skipped files: {self.stats['skipped_files']}")
-        logger.info(f"  Removed tags: {self.stats['removed_tags']}")
-        logger.info(f"  Redacted text regions: {self.stats['redacted_text_regions']}")
-        logger.info(f"  Errors: {self.stats['errors']}")
+        logger.info(f"📊 Anonymization complete. Statistics:")
+        logger.info(f"  ✅ Processed files: {self.stats['processed_files']}")
+        logger.info(f"  ⚠️ Skipped files: {self.stats['skipped_files']}")
+        logger.info(f"  🔒 Removed tags: {self.stats['removed_tags']}")
+        logger.info(f"  🔒 Redacted text regions: {self.stats['redacted_text_regions']}")
+        logger.info(f"  ❌ Errors: {self.stats['errors']}")
         
         return self.stats
 
@@ -554,8 +557,6 @@ if __name__ == "__main__":
     parser.add_argument('--pattern', default='*.dcm', help='File pattern for DICOM files')
     parser.add_argument('--keep-uids', action='store_true', help='Keep original UIDs')
     parser.add_argument('--no-redact', action='store_true', help='Skip redaction of burned-in text')
-    parser.add_argument('--keep-compressed', action='store_true', 
-                        help='Keep original compression (may fail with some files)')
     parser.add_argument('--log-level', default='INFO', 
                         choices=['DEBUG', 'INFO', 'WARNING', 'ERROR'], 
                         help='Logging level')
@@ -578,7 +579,7 @@ if __name__ == "__main__":
             file_pattern=args.pattern,
             redact_overlays=not args.no_redact,
             keep_uids=args.keep_uids,
-            force_uncompressed=not args.keep_compressed
+      
         )
     else:
         # Process single file
@@ -586,6 +587,5 @@ if __name__ == "__main__":
             args.input, 
             args.output, 
             redact_overlays=not args.no_redact,
-            keep_uids=args.keep_uids,
-            force_uncompressed=not args.keep_compressed
+            keep_uids=args.keep_uids
         )
