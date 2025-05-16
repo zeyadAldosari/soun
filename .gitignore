@@ -1,4 +1,5 @@
 venv
 .env
-..pyc
-.vscode
+**.pyc
+
+temp_uploads/
