@@ -7,5 +7,6 @@
         "pydicom",
         "soun",
         "uvicorn"
-    ]
+    ],
+    "svg.preview.background": "black"
 }
