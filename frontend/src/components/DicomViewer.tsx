@@ -14,9 +14,9 @@ import {
   Box,
   Typography,
 } from '@mui/material';
-import cornerstone from 'cornerstone-core';
-import cornerstoneWADOImageLoader from 'cornerstone-wado-image-loader';
-import dicomParser from 'dicom-parser';
+
+// Don't import cornerstone libraries at the top level
+// We'll import them dynamically in useEffect
 
 interface ImageMetadata {
   patientID: string;
@@ -31,21 +31,61 @@ const DicomViewer = () => {
   const [open, setOpen] = useState<boolean>(false);
   const [selectedImages, setSelectedImages] = useState<File[]>([]);
   const imageRefs = useRef<HTMLDivElement[]>([]);
-
+  const [cornerstoneLoaded, setCornerstoneLoaded] = useState(false);
+  // Add state to track if we're in browser environment
+  const [isBrowser, setIsBrowser] = useState(false);
+  
+  // First useEffect just to set isBrowser
   useEffect(() => {
-    cornerstoneWADOImageLoader.external.cornerstone = cornerstone;
-    cornerstoneWADOImageLoader.external.dicomParser = dicomParser;
-    cornerstoneWADOImageLoader.configure({});
+    setIsBrowser(true);
   }, []);
+  
+  // Dynamic imports for client-side only libraries
+  useEffect(() => {
+    // Only proceed if we're in the browser
+    if (!isBrowser) return;
+    
+    let cornerstone: any;
+    let cornerstoneWADOImageLoader: any;
+    let dicomParser: any;
+    
+    const loadLibraries = async () => {
+      try {
+        // Dynamically import the libraries
+        cornerstone = (await import('cornerstone-core')).default;
+        cornerstoneWADOImageLoader = (await import('cornerstone-wado-image-loader')).default;
+        dicomParser = (await import('dicom-parser')).default;
+        
+        // Configure the libraries
+        cornerstoneWADOImageLoader.external.cornerstone = cornerstone;
+        cornerstoneWADOImageLoader.external.dicomParser = dicomParser;
+        cornerstoneWADOImageLoader.configure({});
+        
+        // Store them on window for later access
+        window.cornerstone = cornerstone;
+        window.cornerstoneWADOImageLoader = cornerstoneWADOImageLoader;
+        window.dicomParser = dicomParser;
+        
+        setCornerstoneLoaded(true);
+      } catch (error) {
+        console.error('Error loading cornerstone libraries:', error);
+      }
+    };
 
-  const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-    if (event.target.files) {
-      const filesArray = Array.from(event.target.files);
+    loadLibraries();
+  }, [isBrowser]);
 
-      filesArray.forEach(async (file) => {
-        const dataSet = dicomParser.parseDicom(
-          new Uint8Array(await file.arrayBuffer()),
-        );
+  const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    if (!cornerstoneLoaded || !event.target.files) return;
+    
+    const filesArray = Array.from(event.target.files);
+    const { dicomParser } = window as any;
+
+    for (const file of filesArray) {
+      try {
+        const arrayBuffer = await file.arrayBuffer();
+        const dataSet = dicomParser.parseDicom(new Uint8Array(arrayBuffer));
+        
         const patientID = dataSet.string('x00100020') || 'Unknown';
         const modality = dataSet.string('x00080060') || 'Unknown';
         const seriesInstanceUID = dataSet.string('x0020000e') || 'Unknown';
@@ -71,7 +111,9 @@ const DicomViewer = () => {
             ];
           }
         });
-      });
+      } catch (error) {
+        console.error('Error parsing DICOM file:', error);
+      }
     }
   };
 
@@ -97,20 +139,38 @@ const DicomViewer = () => {
   }, [setOpen, setSelectedImages]);
 
   const loadImage = async (file: File, index: number) => {
+    if (!cornerstoneLoaded) return;
+    
     const element = imageRefs.current[index];
     if (element) {
+      const { cornerstone, cornerstoneWADOImageLoader } = window as any;
+      
       cornerstone.enable(element);
       const imageId = cornerstoneWADOImageLoader.wadouri.fileManager.add(file);
-      const image = await cornerstone.loadImage(imageId);
-      cornerstone.displayImage(element, image);
+      try {
+        const image = await cornerstone.loadImage(imageId);
+        cornerstone.displayImage(element, image);
+      } catch (error) {
+        console.error('Error loading DICOM image:', error);
+      }
     }
   };
 
   return (
     <main>
       <div className="container">
-        <input type="file" accept=".dcm" multiple onChange={handleFileChange} />
-        {metadata.length ? (
+        <input 
+        className='border-2 border-[#303030] rounded-2xl w-32 h-32'
+          type="file" 
+          accept=".dcm" 
+          multiple 
+          onChange={handleFileChange}
+          disabled={!cornerstoneLoaded}
+        />
+        {isBrowser && !cornerstoneLoaded && (
+          <Typography color="error">Loading DICOM libraries...</Typography>
+        )}
+        {metadata.length > 0 && (
           <TableContainer component={Paper}>
             <Table>
               <TableHead>
@@ -142,7 +202,7 @@ const DicomViewer = () => {
               </TableBody>
             </Table>
           </TableContainer>
-        ) : null}
+        )}
       </div>
       <Modal open={open} onClose={handleCloseModal}>
         <Box className="box">
@@ -166,5 +226,14 @@ const DicomViewer = () => {
     </main>
   );
 };
+
+// Adding TypeScript interface for window object
+declare global {
+  interface Window {
+    cornerstone: any;
+    cornerstoneWADOImageLoader: any;
+    dicomParser: any;
+  }
+}
 
 export default React.memo(DicomViewer);
