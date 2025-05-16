@@ -1,5 +1,5 @@
 from fastapi import FastAPI, UploadFile, File, HTTPException, Query
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 import os
 import shutil
 import uuid
@@ -13,6 +13,7 @@ from utils.anonymizer import DicomAnonymizer
 from utils.dicom_faker import insert_fake_data
 from contextlib import asynccontextmanager
 from fastapi.staticfiles import StaticFiles
+
 
 logging.basicConfig(level=logging.INFO, 
                     format='%(asctime)s - %(levelname)s - %(message)s')
@@ -65,32 +66,38 @@ async def insert_fake_data_endpoint(file: UploadFile = File(...)):
         raise HTTPException(status_code=500, detail=f"Error processing file: {str(e)}")
 
 
+from fastapi.responses import StreamingResponse
+from fastapi import Header
+import io
+import json
+
 @app.post("/anonymize/")
 async def anonymize_endpoint(
     file: UploadFile = File(...),
     use_advanced: bool = Query(False, description="Use the advanced anonymizer implementation"),
     redact_overlays: bool = Query(True, description="Attempt to redact burned-in text"),
     keep_uids: bool = Query(False, description="Keep original UIDs"),
-    force_uncompressed: bool = Query(True, description="Convert to uncompressed transfer syntax")
+    force_uncompressed: bool = Query(True, description="Convert to uncompressed transfer syntax"),
+    accept: str = Header(None)  # Get the Accept header to determine response format
 ):
     if not file.filename.lower().endswith(".dcm"):
         raise HTTPException(status_code=400, detail="Only .dcm files are accepted")
-    
+   
     temp_file_path = os.path.join(UPLOAD_DIR, file.filename)
     with open(temp_file_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
-        
+       
     timestamp_str = time.strftime("%Y%m%d_%H%M%S", time.localtime())
     output_filename = f"anonymized_{timestamp_str}_{file.filename}"
     output_path = os.path.join(UPLOAD_DIR, output_filename)
-    
+   
     try:
         stats = None
         if use_advanced:
             logger.info(f"Using advanced anonymizer for {file.filename}")
             anonymizer = DicomAnonymizer(ocr_languages=['en'], ocr_gpu=False)
             success = anonymizer.anonymize_file(
-                temp_file_path, 
+                temp_file_path,
                 output_path,
                 redact_overlays=redact_overlays,
                 keep_uids=keep_uids,
@@ -100,18 +107,46 @@ async def anonymize_endpoint(
             if not success:
                 raise Exception("Advanced anonymization failed")
         else:
-            logger.info(f"Usingggg original anonymizer for {file.filename}")
+            logger.info(f"Using original anonymizer for {file.filename}")
             anonymizer = DicomAnonymizer()
             anonymizer.anonymize_file(temp_file_path, output_path)
-        
+       
         file_url = f"/files/{output_filename}"
         
-        return ProcessResponse(
-            filename=output_filename,
-            message="DICOM file anonymized successfully",
-            file_url=file_url,  # Include the URL in the response
-            stats=stats
+        # Create metadata dictionary
+        metadata = {
+            "filename": output_filename,
+            "message": "DICOM file anonymized successfully",
+            "file_url": file_url,
+            "stats": stats
+        }
+        
+        # If client requests JSON, return just the metadata with file_url
+        if accept and "application/json" in accept:
+            return metadata
+            
+        # Otherwise stream the binary file with metadata in headers
+        def iterfile():
+            with open(output_path, mode="rb") as file_like:
+                yield from file_like
+        
+        # Create a StreamingResponse with the DICOM file data
+        response = StreamingResponse(
+            iterfile(),
+            media_type="application/dicom"
         )
+        
+        # Add metadata as headers
+        response.headers["X-Filename"] = output_filename
+        response.headers["X-Message"] = "DICOM file anonymized successfully"
+        response.headers["X-File-URL"] = file_url
+        
+        # If stats exist, convert to JSON string and add as header
+        if stats:
+            response.headers["X-Stats"] = json.dumps(stats)
+            
+        return response
+        
     except Exception as e:
         logger.error(f"Error processing file: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error processing file: {str(e)}")
