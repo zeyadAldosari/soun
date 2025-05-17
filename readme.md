@@ -15,9 +15,19 @@ DICOM Remover is a specialized utility designed for healthcare professionals, re
 ## Installation
 
 ### Prerequisites
--docker
+-python
+-nodejs
+-pip
 
 ### Start the server
 ```bash
-docker-compose up -d --build
+cd backend
+pip install -r requirements.txt
+python app.py
+```
+### Start the frontend
+```bash
+cd frontend
+npm install
+npm run dev
 ```
