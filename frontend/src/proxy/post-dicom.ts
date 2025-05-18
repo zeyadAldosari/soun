@@ -13,7 +13,7 @@ export const postDicom = async (file: any) => {
             force_uncompressed: "true",
         });
 
-        const url = `http://15.185.71.31/anonymize/?${queryParams}`;
+        const url = `https://soun-backend.onrender.com/anonymize/?${queryParams}`;
 
         const response = await fetch(url, {
             method: "POST",
