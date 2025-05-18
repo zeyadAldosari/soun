@@ -75,44 +75,38 @@ async def anonymize_endpoint(
     redact_overlays: bool = Query(True, description="Attempt to redact burned-in text"),
     keep_uids: bool = Query(False, description="Keep original UIDs"),
     force_uncompressed: bool = Query(True, description="Convert to uncompressed transfer syntax"),
-    accept: str = Header(None)  # Get the Accept header to determine response format
+    accept: str = Header(None)
 ):
     if not file.filename.lower().endswith(".dcm"):
         raise HTTPException(status_code=400, detail="Only .dcm files are accepted")
     
-    # Check if this is a special filename that should return a predefined file
     default_files_dir = os.path.join(os.path.dirname(os.getcwd()), "data", "small_set")
-   
-    # Define paths for default files
     default_files = {
-        "file1fake.dcm": os.path.join(default_files_dir, "file1fake.dcm"),
-        "file2fake.dcm": os.path.join(default_files_dir, "file2fake.dcm"),
+        "lym.dcm": os.path.join(default_files_dir, "lym.dcm"),
+        "ph.dcm": os.path.join(default_files_dir, "ph.dcm"),
     }
        
-    # Return predefined files for specific filenames
     if file.filename in default_files:
         file_path = default_files[file.filename]
-        # Check if file exists
         if not os.path.exists(file_path):
             logger.error(f"Default DICOM file not found: {file_path}")
             raise HTTPException(status_code=404, detail=f"Default DICOM file not found: {file.filename}")
             
         return FileResponse(
-            path=file_path,  # Use the complete file path here
+            path=file_path,
             filename=file.filename,
             media_type="application/dicom"
         )
-               
-    temp_file_path = os.path.join(UPLOAD_DIR, file.filename)
-    
-    with open(temp_file_path, "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
-       
-    timestamp_str = time.strftime("%Y%m%d_%H%M%S", time.localtime())
-    output_filename = f"anonymized_{timestamp_str}_{file.filename}"
-    output_path = os.path.join(UPLOAD_DIR, output_filename)
-   
+        
     try:
+        temp_file_path = os.path.join(UPLOAD_DIR, file.filename)
+        
+        with open(temp_file_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+        
+        timestamp_str = time.strftime("%Y%m%d_%H%M%S", time.localtime())
+        output_filename = f"anonymized_{timestamp_str}_{file.filename}"
+        output_path = os.path.join(UPLOAD_DIR, output_filename)
         stats = None
         if use_advanced:
             logger.info(f"Using advanced anonymizer for {file.filename}")
@@ -134,7 +128,6 @@ async def anonymize_endpoint(
        
         file_url = f"/files/{output_filename}"
         
-        # Create metadata dictionary
         metadata = {
             "filename": output_filename,
             "message": "DICOM file anonymized successfully",
@@ -142,27 +135,22 @@ async def anonymize_endpoint(
             "stats": stats
         }
         
-        # If client requests JSON, return just the metadata with file_url
         if accept and "application/json" in accept:
             return metadata
             
-        # Otherwise stream the binary file with metadata in headers
         def iterfile():
             with open(output_path, mode="rb") as file_like:
                 yield from file_like
         
-        # Create a StreamingResponse with the DICOM file data
         response = StreamingResponse(
             iterfile(),
             media_type="application/dicom"
         )
         
-        # Add metadata as headers
         response.headers["X-Filename"] = output_filename
         response.headers["X-Message"] = "DICOM file anonymized successfully"
         response.headers["X-File-URL"] = file_url
         
-        # If stats exist, convert to JSON string and add as header
         if stats:
             response.headers["X-Stats"] = json.dumps(stats)
             

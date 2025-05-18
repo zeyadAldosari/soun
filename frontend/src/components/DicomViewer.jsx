@@ -271,7 +271,7 @@ const DicomViewer = () => {
     try {
       const response = await fetch(fileName);
       const blob = await response.blob();
-      const file = new File([blob], 'file.dcm');
+      const file = new File([blob], fileName);
 
       const { dicomParser } = window;
       const arrayBuffer = await file.arrayBuffer();
@@ -337,7 +337,6 @@ const DicomViewer = () => {
   const handleAnonymize = async () => {
     setIsLoading(true);
     try {
-      // The postDicom function now returns binary data instead of a file URL
       const binaryData = await postDicom(dicomFile);
 
       // Create a file from the binary data
@@ -425,7 +424,7 @@ const DicomViewer = () => {
               <div className="flex justify-center gap-4 mt-4">
                 <button
                   onClick={() => {
-                    handleFileChangeDefault('file1fake.dcm');
+                    handleFileChangeDefault('lym.dcm');
                   }}
                   className="bg-[#404040]/9 border border-[#404040]/10 rounded-2xl bg-opacity-20 backdrop-blur-sm hover:bg-[hsl(0,0%,15%)] text-white transition-colors text-sm sm:text-base cursor-pointer w-32 aspect-square relative overflow-hidden"
                 >
@@ -440,7 +439,7 @@ const DicomViewer = () => {
                 </button>
                 <button
                   onClick={() => {
-                    handleFileChangeDefault('file2fake.dcm');
+                    handleFileChangeDefault('ph.dcm');
                   }}
                   className="bg-[#404040]/9 border border-[#404040]/10 rounded-2xl bg-opacity-20 backdrop-blur-sm hover:bg-[hsl(0,0%,15%)] text-white transition-colors text-sm sm:text-base cursor-pointer w-32 aspect-square overflow-hidden"
                 >
