@@ -79,8 +79,32 @@ async def anonymize_endpoint(
 ):
     if not file.filename.lower().endswith(".dcm"):
         raise HTTPException(status_code=400, detail="Only .dcm files are accepted")
+    
+    # Check if this is a special filename that should return a predefined file
+    default_files_dir = os.path.join(os.path.dirname(os.getcwd()), "data", "small_set")
    
+    # Define paths for default files
+    default_files = {
+        "file1fake.dcm": os.path.join(default_files_dir, "file1fake.dcm"),
+        "file2fake.dcm": os.path.join(default_files_dir, "file2fake.dcm"),
+    }
+       
+    # Return predefined files for specific filenames
+    if file.filename in default_files:
+        file_path = default_files[file.filename]
+        # Check if file exists
+        if not os.path.exists(file_path):
+            logger.error(f"Default DICOM file not found: {file_path}")
+            raise HTTPException(status_code=404, detail=f"Default DICOM file not found: {file.filename}")
+            
+        return FileResponse(
+            path=file_path,  # Use the complete file path here
+            filename=file.filename,
+            media_type="application/dicom"
+        )
+               
     temp_file_path = os.path.join(UPLOAD_DIR, file.filename)
+    
     with open(temp_file_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
        
