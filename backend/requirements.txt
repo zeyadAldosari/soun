@@ -10,3 +10,5 @@ opencv-python
 pylibjpeg
 pylibjpeg-libjpeg
 pylibjpeg-openjpeg
+openai
+python-dotenv

@@ -13,6 +13,8 @@ from utils.anonymizer import DicomAnonymizer
 from utils.dicom_faker import insert_fake_data
 from contextlib import asynccontextmanager
 from fastapi.staticfiles import StaticFiles
+from fastapi import Header
+import json
 
 
 logging.basicConfig(level=logging.INFO, 
@@ -64,12 +66,7 @@ async def insert_fake_data_endpoint(file: UploadFile = File(...)):
     except Exception as e:
         logger.error(f"Error processing file: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error processing file: {str(e)}")
-
-
-from fastapi.responses import StreamingResponse
-from fastapi import Header
-import io
-import json
+    
 
 @app.post("/anonymize/")
 async def anonymize_endpoint(
